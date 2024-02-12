@@ -1,0 +1,147 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"time"
+)
+
+// Block represents a Bitcoin block
+type Block struct {
+	Version       int32
+	PrevBlockHash []byte
+	MerkleRoot    []byte
+	Timestamp     int64
+	Bits          int32
+	Nonce         int32
+	Transactions  []*Transaction
+}
+
+// Transaction represents a Bitcoin transaction
+type Transaction struct {
+	Version  int32
+	InCount  int32
+	OutCount int32
+	Inputs   []*TxInput
+	Outputs  []*TxOutput
+}
+
+// TxInput represents a transaction input
+type TxInput struct {
+	PrevOutputHash  []byte
+	PrevOutputIndex int32
+	ScriptLength    int32
+	ScriptSig       []byte
+	Sequence        int32
+}
+
+// TxOutput represents a transaction output
+type TxOutput struct {
+	Value          int64
+	ScriptLength   int32
+	ScriptPubKey   []byte
+}
+
+func NewBlock() *Block {
+	return &Block{}
+}
+
+func NewTransaction() *Transaction {
+	return &Transaction{}
+}
+
+func NewTxInput() *TxInput {
+	return &TxInput{}
+}
+
+func NewTxOutput() *TxOutput {
+	return &TxOutput{}
+}
+
+// Serialize the block header
+func (b *Block) Serialize() []byte {
+	var result bytes.Buffer
+
+	binary.Write(&result, binary.LittleEndian, b.Version)
+	result.Write(b.PrevBlockHash)
+	result.Write(b.MerkleRoot)
+	binary.Write(&result, binary.LittleEndian, b.Timestamp)
+	binary.Write(&result, binary.LittleEndian, b.Bits)
+	binary.Write(&result, binary.LittleEndian, b.Nonce)
+
+	return result.Bytes()
+}
+
+// Serialize the transaction
+func (tx *Transaction) Serialize() []byte {
+	var result bytes.Buffer
+
+	binary.Write(&result, binary.LittleEndian, tx.Version)
+	binary.Write(&result, binary.LittleEndian, tx.InCount)
+	for _, input := range tx.Inputs {
+		result.Write(input.PrevOutputHash)
+		binary.Write(&result, binary.LittleEndian, input.PrevOutputIndex)
+		binary.Write(&result, binary.LittleEndian, input.ScriptLength)
+		result.Write(input.ScriptSig)
+		binary.Write(&result, binary.LittleEndian, input.Sequence)
+	}
+	binary.Write(&result, binary.LittleEndian, tx.OutCount)
+	for _, output := range tx.Outputs {
+		binary.Write(&result, binary.LittleEndian, output.Value)
+		binary.Write(&result, binary.LittleEndian, output.ScriptLength)
+		result.Write(output.ScriptPubKey)
+	}
+
+	return result.Bytes()
+}
+
+func main() {
+	// Create a new block
+	block := NewBlock()
+
+	// Set block header fields
+	block.Version = 1
+	block.PrevBlockHash = make([]byte, 32) // previous block hash
+	block.MerkleRoot = make([]byte, 32)    // merkle root of transactions
+	block.Timestamp = time.Now().Unix()
+	block.Bits = 0x1d00ffff // Difficulty target
+	block.Nonce = 0
+
+	// Create a new transaction
+	tx := NewTransaction()
+
+	// Add transaction inputs and outputs
+	tx.Version = 1
+	tx.InCount = 1
+	tx.OutCount = 1
+
+	// Add transaction input
+	input := NewTxInput()
+	input.PrevOutputHash = make([]byte, 32) // Previous transaction hash
+	input.PrevOutputIndex = 0                 // Previous transaction output index
+	input.ScriptLength = 0                    // Length of the unlocking script
+	input.ScriptSig = make([]byte, 0)         // Unlocking script
+	input.Sequence = 0                        // Input sequence number
+	tx.Inputs = append(tx.Inputs, input)
+
+	// Add transaction output
+	output := NewTxOutput()
+	output.Value = 5000000000 // Satoshis (50 bitcoins)
+	output.ScriptLength = 0
+	output.ScriptPubKey = make([]byte, 0)
+	tx.Outputs = append(tx.Outputs, output)
+
+	// Add transaction to the block
+	block.Transactions = append(block.Transactions, tx)
+
+	// Serialize the block header
+	blockBytes := block.Serialize()
+	fmt.Printf("Block: %x\n", block)
+
+	// Calculate the hash of the block header
+	hash := sha256.Sum256(blockBytes)
+	fmt.Printf("Block Hash: %x\n", hash)
+}
+
