@@ -1,4 +1,4 @@
-# Bitcoin transaction builder
+# Bitcoin block constructor simulator
 
 ## Project Description
 
