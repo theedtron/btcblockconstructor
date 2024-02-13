@@ -1,114 +1,142 @@
 package main
 
 import (
-    "encoding/csv"
-    "fmt"
-    "os"
-    "strconv"
-    "strings"
+	"encoding/csv"
+	"fmt"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 type Transaction struct {
-    TxID        string
-    Fee         int
-    Weight      int
-    ParentTxIDs []string
+	TxID    string
+	Fee     int
+	Weight  int
+	Parents []string
 }
 
 func main() {
-    // Read the mempool.csv file
-    file, err := os.Open("mempool.csv")
-    if err != nil {
-        fmt.Println("Error opening file:", err)
-        return
-    }
-    defer file.Close()
+	transactions, err := readCSV("mempool.csv")
+	if err != nil {
+		fmt.Println("Error reading CSV:", err)
+		return
+	}
 
-    // Parse the CSV data
-    reader := csv.NewReader(file)
-    lines, err := reader.ReadAll()
-    if err != nil {
-        fmt.Println("Error reading CSV:", err)
-        return
-    }
+	// Sort transactions by parents
+	sortedByParents := sortTrxByParents(transactions)
 
-    // Parse transactions
-    var transactions []Transaction
-    for _, line := range lines {
-		fmt.Println(line[1])
-		os.Exit(0)
-        fee, _ := strconv.Atoi(line[1])
-        weight, _ := strconv.Atoi(line[2])
-        parentTxIDs := strings.Split(line[3], ";")
+	// Sort transactions by fee
+	sortedByFee := getFeeArray(sortedByParents)
 
-        tx := Transaction{
-            TxID:        line[0],
-            Fee:         fee,
-            Weight:      weight,
-            ParentTxIDs: parentTxIDs,
-        }
-        transactions = append(transactions, tx)
-    }
+	// Select transactions by weight
+	selectedByWeight := selectTransactionsByWeight(sortedByFee)
 
-    // Select transactions for the block
-    block := selectTransactions(transactions)
-
-    // Output the block
-    for _, tx := range block {
-        fmt.Println(tx.TxID)
-    }
+	totalFee := 0
+	totalWeight := 0
+	for _, blockTrx := range selectedByWeight {
+		fmt.Println(blockTrx.TxID)
+		totalFee += blockTrx.Fee
+		totalWeight += blockTrx.Weight
+	}
+	fmt.Println("Total Fee:", totalFee)
+	fmt.Println("Total Weight:", totalWeight)
 }
 
-func selectTransactions(transactions []Transaction) []Transaction {
-    // Sort transactions by fee (descending order)
-    sortByFee(transactions)
+func readCSV(filePath string) ([]Transaction, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-    // Initialize a map to track transaction inclusion
-    included := make(map[string]bool)
+	reader := csv.NewReader(file)
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
 
-    // Initialize block weight and total fee
-    blockWeight := 0
-    totalFee := 0
+	var transactions []Transaction
+	for _, row := range rows {
+		line := strings.Split(row[0],",")
+		fee, _ := strconv.Atoi(line[1])
+		weight, _ := strconv.Atoi(line[2])
+		var parents []string
+		if line[3] != "" {
+			parents = strings.Split(line[3], ",")
+		}
+		transaction := Transaction{
+			TxID:    line[0],
+			Fee:     fee,
+			Weight:  weight,
+			Parents: parents,
+		}
+		transactions = append(transactions, transaction)
+	}
 
-    // Initialize the block
-    var block []Transaction
-
-    // Iterate through transactions
-    for _, tx := range transactions {
-        // Check if transaction can be included in the block
-        if canIncludeTransaction(tx, included) && blockWeight+tx.Weight <= 4000000 {
-            // Include transaction in the block
-            block = append(block, tx)
-            included[tx.TxID] = true
-            blockWeight += tx.Weight
-            totalFee += tx.Fee
-        }
-    }
-
-    fmt.Println("Total fee collected:", totalFee)
-
-    return block
+	return transactions, nil
 }
 
-func sortByFee(transactions []Transaction) {
-    // Sort transactions by fee (descending order)
-    for i := range transactions {
-        maxIndex := i
-        for j := i + 1; j < len(transactions); j++ {
-            if transactions[j].Fee > transactions[maxIndex].Fee {
-                maxIndex = j
-            }
-        }
-        transactions[i], transactions[maxIndex] = transactions[maxIndex], transactions[i]
-    }
+func sortTrxByParents(transactions []Transaction) []Transaction {
+	// Create a map to store transaction by TxID
+	txMap := make(map[string]Transaction)
+	for _, trx := range transactions {
+		txMap[trx.TxID] = trx
+	}
+
+	// Remove transactions which parents are not included
+	for _, trx := range transactions {
+		for _, parent := range trx.Parents {
+			parentTx, ok := txMap[parent]
+			if !ok {
+				delete(txMap, trx.TxID)
+				break
+			}
+			if parentTx.TxID != trx.TxID {
+				delete(txMap, trx.TxID)
+				break
+			}
+		}
+	}
+
+	// Create a slice to store transactions ordered by parents
+	var sortedTransactions []Transaction
+	for _, trx := range txMap {
+		sortedTransactions = append(sortedTransactions, trx)
+	}
+
+	return sortedTransactions
 }
 
-func canIncludeTransaction(tx Transaction, included map[string]bool) bool {
-    // Check if all parent transactions are included
-    for _, parentTxID := range tx.ParentTxIDs {
-        if !included[parentTxID] {
-            return false
-        }
-    }
-    return true
+func getFeeArray(transactions []Transaction) map[int]Transaction {
+	feeArray := make(map[int]Transaction)
+	for _, transaction := range transactions {
+		feeArray[transaction.Fee] = transaction
+	}
+	return feeArray
+}
+
+func selectTransactionsByWeight(transactions map[int]Transaction) []Transaction {
+	// Create a slice to store transactions ordered by fee
+	var sortedByFee []Transaction
+	for _, trx := range transactions {
+		sortedByFee = append(sortedByFee, trx)
+	}
+
+	// Sort transactions by fee in descending order
+	sort.Slice(sortedByFee, func(i, j int) bool {
+		return sortedByFee[i].Fee > sortedByFee[j].Fee
+	})
+
+	// Select transactions by weight until total weight reaches 4000000
+	totalWeight := 0
+	var selectedTransactions []Transaction
+	for _, trx := range sortedByFee {
+		if totalWeight+trx.Weight <= 4000000 {
+			selectedTransactions = append(selectedTransactions, trx)
+			totalWeight += trx.Weight
+		}
+	}
+
+	return selectedTransactions
 }
